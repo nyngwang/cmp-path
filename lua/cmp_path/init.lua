@@ -1,6 +1,6 @@
 local cmp = require 'cmp'
 
-local NAME_REGEX = '\\%([^/\\\\:\\*?<>\'"`\\|]\\)'
+local NAME_REGEX = [[\%([^/\\:*?<>'"`|]\)]]
 local PATH_REGEX = vim.regex(([[\%(\%(/PAT*[^/\\\\:\\*?<>\'"`\\| .~]\)\|\%(/\.\.\)\)*/\zePAT*$]]):gsub('PAT', NAME_REGEX))
 
 local source = {}
@@ -66,13 +66,14 @@ source.resolve = function(self, completion_item, callback)
 end
 
 source._dirname = function(self, params, option)
+  -- print('cursor_before_line:', params.context.cursor_before_line)
   local s = PATH_REGEX:match_str(params.context.cursor_before_line)
   if not s then
     return nil
   end
 
   local dirname = string.gsub(string.sub(params.context.cursor_before_line, s + 2), '%a*$', '') -- exclude '/'
-  local prefix = string.sub(params.context.cursor_before_line, 1, s + 1) -- include '/'
+  local prefix = params.context.cursor_before_line -- string.sub(params.context.cursor_before_line, 1, s + 1) -- include '/'
 
   local buf_dirname = option.get_cwd(params)
   if vim.api.nvim_get_mode().mode == 'c' then
@@ -94,6 +95,36 @@ source._dirname = function(self, params, option)
       return vim.fn.resolve(env_var_value .. '/' .. dirname)
     end
   end
+
+  -- what it does: replace all alias by tsconfig.json located at the project root, which is the cwd when you open neovim.
+  -- assumptions:
+  -- 1. you should not use the same alias twice in your import path.
+  -- 2. you should not append `../$`, `./$`, `~/$` to any import path starting with an alias.
+  -- 3. you should only expect that for every key, only the first path will be used.
+  -- 4. you should not expect intellisense before the first `/`.
+  local project_root = vim.fn.getcwd(-1, -1)
+  local tsconfig_path = project_root .. '/tsconfig.json'
+  local fp = io.open(tsconfig_path, 'r')
+  if fp then
+    local ok, json_tsconfig = pcall(vim.json.decode, fp:read('*a'))
+    if ok
+      and json_tsconfig['compilerOptions']
+      and json_tsconfig['compilerOptions']['paths']
+    then
+      local base = json_tsconfig['compilerOptions']['baseUrl'] or ''
+
+      for key, paths in pairs(json_tsconfig['compilerOptions']['paths']) do
+        local pattern = key:gsub('%*$', '')
+        local path = paths[1]:gsub('%*$', '') -- only the first path is picked.
+
+        if prefix:match(pattern) then -- no partial match for now.
+          return vim.fn.resolve(project_root .. '/' .. base .. '/' .. prefix:match(pattern .. '%S*'):gsub(pattern, path))
+        end
+      end
+    end
+    fp:close()
+  end
+
   if prefix:match('/$') then
     local accept = true
     -- Ignore URL components
