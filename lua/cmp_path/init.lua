@@ -117,7 +117,7 @@ source._dirname = function(self, params, option)
         local pattern = key:gsub('%*$', '')
         local path = paths[1]:gsub('%*$', '') -- only the first path is picked.
 
-        if _prefix:match(pattern) then -- no partial match for now.
+        if _prefix:match('[\'"]' .. pattern) then -- no partial match for now.
           return vim.fn.resolve(project_root .. '/' .. base .. '/' .. _prefix:match(pattern .. '%S*'):gsub(pattern, path))
         end
       end
